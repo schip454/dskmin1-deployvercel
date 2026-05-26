@@ -1,5 +1,25 @@
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /*?*utm_
+Disallow: /*?*fbclid
+Disallow: /*?*yclid
+Disallow: /*?*gclid
+Crawl-delay: 1
+
+User-agent: Yandex
+Allow: /
+Disallow: /api/
+Clean-param: utm_source&utm_medium&utm_campaign&utm_term&utm_content&yclid&gclid&fbclid
+
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
 
 Sitemap: https://dskmin1.ru/sitemap.xml
+Host: dskmin1.ru
