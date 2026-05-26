@@ -1,0 +1,154 @@
+# ============================================================
+# ДСК МИН-1 — .htaccess для shared-хостинга reg.ru (Apache + nginx-фронт)
+# ============================================================
+# Цель: security headers + кэш + сжатие + force HTTPS на хостинге без vercel.json.
+# Apache на reg.ru обычно имеет: mod_rewrite, mod_headers, mod_deflate,
+# mod_expires, mod_mime — этого достаточно.
+# ============================================================
+
+# Базовая кодировка
+AddDefaultCharset UTF-8
+
+# Запрещаем листинг директорий
+Options -Indexes
+
+# Запрещаем доступ к скрытым и системным файлам
+<FilesMatch "^\.|\.(env|gitignore|gitattributes|md|yml|yaml|json|lock|log|sh|bak|swp|sql)$">
+  Require all denied
+</FilesMatch>
+# Но vercel.json в корне отдаётся не должен в любом случае — но мы его не загружаем сюда
+
+# ============================================================
+# REWRITE: HTTPS + non-www + clean URLs
+# ============================================================
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Force HTTPS. После выпуска SSL через ISPmanager.
+  RewriteCond %{HTTPS} off
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+  # 2. Редирект www → non-www (канонический домен dskmin1.ru без www).
+  RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+  RewriteRule ^ https://%1%{REQUEST_URI} [R=301,L]
+
+  # 3. Убираем .html из URL — / запросы автоматически идут на index.html
+  #    благодаря DirectoryIndex ниже. Эта правила убирает .html если кто-то ввёл вручную.
+  RewriteCond %{THE_REQUEST} \s/+(.+?)\.html[\s?] [NC]
+  RewriteRule ^ /%1 [R=301,L,NE]
+
+  # 4. Внутренний rewrite: /privacy → /privacy/index.html (без редиректа в браузере)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME}.html -f
+  RewriteRule ^(.+?)/?$ $1.html [L]
+</IfModule>
+
+DirectoryIndex index.html
+
+# ============================================================
+# КАСТОМНАЯ 404
+# ============================================================
+ErrorDocument 404 /404.html
+
+# ============================================================
+# SECURITY HEADERS
+# ============================================================
+<IfModule mod_headers.c>
+  # Запрет MIME-sniffing
+  Header always set X-Content-Type-Options "nosniff"
+
+  # Запрет фреймов с других доменов (clickjacking)
+  Header always set X-Frame-Options "SAMEORIGIN"
+
+  # XSS protection (наследие, не вредит)
+  Header always set X-XSS-Protection "1; mode=block"
+
+  # Управление утечкой Referer'а
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+  # Запрет лишних API браузера + FLoC
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+
+  # HSTS — после полной проверки HTTPS включить preload
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+  # CSP — мягкая для статики с inline-скриптами Astro
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self'; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://api.ipify.org; frame-src 'self' https://yandex.ru https://*.yandex.ru https://yandex.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self' https://script.google.com; object-src 'none'; upgrade-insecure-requests"
+
+  # Server header — не выдаём подробности о сервере
+  Header unset X-Powered-By
+  Header unset Server
+</IfModule>
+
+# ============================================================
+# СЖАТИЕ (GZIP)
+# ============================================================
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript text/xml text/plain
+  AddOutputFilterByType DEFLATE application/javascript application/x-javascript application/json
+  AddOutputFilterByType DEFLATE application/xml application/rss+xml application/atom+xml
+  AddOutputFilterByType DEFLATE image/svg+xml image/x-icon
+  AddOutputFilterByType DEFLATE font/ttf font/otf font/woff font/woff2 application/font-woff application/font-woff2
+</IfModule>
+
+# ============================================================
+# CACHE-CONTROL (через mod_expires)
+# ============================================================
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresDefault "access plus 1 hour"
+
+  # HTML — не кэшировать долго, иначе клиент не увидит обновления
+  ExpiresByType text/html "access plus 0 seconds"
+
+  # Картинки — год
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType image/webp "access plus 1 year"
+  ExpiresByType image/avif "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType image/x-icon "access plus 1 year"
+
+  # CSS/JS — год (имена хэшируются Astro при сборке)
+  ExpiresByType text/css "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType text/javascript "access plus 1 year"
+
+  # Шрифты — год
+  ExpiresByType font/woff "access plus 1 year"
+  ExpiresByType font/woff2 "access plus 1 year"
+  ExpiresByType font/ttf "access plus 1 year"
+  ExpiresByType font/otf "access plus 1 year"
+
+  # Видео — месяц
+  ExpiresByType video/mp4 "access plus 1 month"
+  ExpiresByType video/webm "access plus 1 month"
+
+  # XML (sitemap, RSS) — день
+  ExpiresByType application/xml "access plus 1 day"
+  ExpiresByType text/xml "access plus 1 day"
+</IfModule>
+
+# Cache-Control immutable для хэшированной статики Astro (_astro/*)
+<IfModule mod_headers.c>
+  <FilesMatch "\.(jpg|jpeg|png|webp|avif|gif|ico|svg|woff|woff2|ttf|otf|js|css)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "\.(html)$">
+    Header set Cache-Control "public, max-age=0, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+# ============================================================
+# MIME TYPES (на случай если хостинг не отдаёт правильные)
+# ============================================================
+<IfModule mod_mime.c>
+  AddType image/webp .webp
+  AddType image/avif .avif
+  AddType font/woff .woff
+  AddType font/woff2 .woff2
+  AddType application/manifest+json .webmanifest
+</IfModule>
