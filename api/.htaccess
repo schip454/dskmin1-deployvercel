@@ -1,0 +1,14 @@
+# /api/.htaccess — защита бэкенда формы
+
+Options -Indexes
+
+# Конфиг и схему — наружу не отдаём
+<FilesMatch "\.(sql|md|sample\.php)$">
+    Require all denied
+</FilesMatch>
+<Files "config.php">
+    Require all denied
+</Files>
+
+# Библиотеку PHPMailer нельзя дёргать напрямую по HTTP (она только require'ится из lead.php)
+RedirectMatch 403 (?i)^/api/PHPMailer/.*$
